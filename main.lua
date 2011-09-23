@@ -299,7 +299,6 @@ end
 ----------------------------------------
 
 NoiseMap = class( PlainMap )
-NoiseMap.AMP = 100
 
 function NoiseMap:init( x, y, w, h, c1, c2, c3, c4 )
   PlainMap.init(self, x, y, w, h)
@@ -330,7 +329,7 @@ function NoiseMap:divide( x, y, w, h, c1, c2, c3, c4 )
     self:divide(x, y + nH, nW, nH, edge4, mid, edge3, c4);
   else
     local c = (c1+c2+c3+c4)/4
-    self:set( math.floor(x), math.floor(y), c * self.AMP )
+    self:set( math.floor(x), math.floor(y), c )
   end
 end
 
@@ -338,30 +337,32 @@ end
 
 WorldChunk = class()
 
-function WorldChunk:init( x, y, w, h, c1, c2, c3, c4 )
+-- In the algo, the corners are clockwise.
+-- In the ctor, the corners are TL TR BL BR for ease of use.
+function WorldChunk:init( x, y, w, h, tl, tr, bl, br )
   self.x = x
   self.y = y
   self.w = w
   self.h = h
-  self.c1 = c1
-  self.c2 = c2
-  self.c3 = c3
-  self.c4 = c4
+  self.tl = tl
+  self.tr = tr
+  self.bl = bl
+  self.br = br
   self.heightMap = PlainMap( x, y, w, h )
   self.floor = PlainMap( x, y, w, h )
 end
 
 function WorldChunk:generate()
-  local noiseMap = NoiseMap( self.x, self.y, self.w, self.h, self.c1, self.c2, self.c3, self.c4 )
+  local noiseMap = NoiseMap(self.x, self.y, self.w, self.h, self.tl, self.tr, self.br, self.bl)
   local heightMap = self.heightMap
   local floorMap = self.floor
   for y = self.y, self.y+self.h-1 do
     for x = self.x, self.x+self.w-1 do
       local v = noiseMap:get(x, y)
       local cell
-      if v < 25 then cell = 4
-      elseif v < 35 then cell = 6
-      elseif v < 65 then cell = 5
+      if v < 0.25 then cell = 4
+      elseif v < 0.35 then cell = 6
+      elseif v < 0.65 then cell = 5
       else cell = 7 end
       floorMap:set( x, y, cell )
       heightMap:set( x, y, v )
@@ -369,7 +370,7 @@ function WorldChunk:generate()
   end
 end
 
-function WorldChunk:isVisible( px, py )
+function WorldChunk:containsPoint( px, py )
   return ( px >= self.x and px < self.x + self.w ) and
          ( py >= self.y and py < self.y + self.h )
 end
@@ -405,46 +406,75 @@ end
 
 ----------------------------------------
 
+WorldMap = class()
+WorldMap.CHUNK_SIZE = 64
+
+function WorldMap:init()
+  self.chunks = PlainMap( -128, -128, 256, 256 )
+end
+
+function WorldMap:draw( px, py )
+  local wx, wy = math.floor(px/self.CHUNK_SIZE), math.floor(py/self.CHUNK_SIZE)
+  for y = wy - 1, wy + 1 do
+    for x = wx - 1, wx + 1 do
+      chunk = self.chunks:get( x, y )
+      if chunk then chunk:draw( px, py ) end
+    end
+  end
+end
+
+function WorldMap:generate( px, py )
+  local SIZE = self.CHUNK_SIZE
+  local wx, wy = math.floor(px/SIZE), math.floor(py/SIZE)
+  for y = wy - 1, wy + 1 do
+    for x = wx - 1, wx + 1 do
+      chunk = self.chunks:get( x, y )
+      if not chunk then
+        local tl, tr, bl, br
+        local north = self.chunks:get( x, y-1 )
+        if north then tl = north.bl; tr = north.br end
+        local south = self.chunks:get( x, y+1 )
+        if south then bl = south.tl; br = south.tr end
+        local west = self.chunks:get( x-1, y )
+        if west then tl = west.tr; bl = west.br end
+        local east = self.chunks:get( x+1, y )
+        if east then tr = east.tl; br = east.bl end
+
+        if not tl then tl = math.random() end
+        if not tr then tr = math.random() end
+        if not bl then bl = math.random() end
+        if not br then br = math.random() end
+
+        print( "Generating chunk at", x, y, px, py, tl, tr, bl, br )
+        local newChunk = WorldChunk( x*SIZE, y*SIZE, SIZE, SIZE, tl, tr, bl, br )
+        newChunk:generate()
+        self.chunks:set( x, y, newChunk )
+      end
+    end
+  end
+end
+
+----------------------------------------
+
 TestState = class()
 
 function TestState:init()
   self.x = 0
   self.y = 0
-  self.chunks = {}
-  self:generateWorld()
-end
-
-function TestState:generateWorld()
-  local cpt = {}
-  for i = 1, 10 do
-    cpt[i] = math.random()
-  end
-  -- clockwise loop on the 'C' Points
-  --  789
-  --  612
-  --  543
-  self.chunks[1] = WorldChunk( 0, 0, 64, 64, cpt[1], cpt[2], cpt[3], cpt[4] )
-  self.chunks[2] = WorldChunk( -64, 0, 64, 64, cpt[6], cpt[1], cpt[4], cpt[5] )
-  self.chunks[3] = WorldChunk( 0, -64, 64, 64, cpt[8], cpt[9], cpt[2], cpt[1] )
-  self.chunks[4] = WorldChunk( -64, -64, 64, 64, cpt[7], cpt[8], cpt[1], cpt[6] )
-  for _, chunk in ipairs(self.chunks) do
-    chunk:generate()
-  end
+  self.world = WorldMap()
+  self.world:generate( self.x, self.y )
 end
 
 function TestState:draw()
   love.graphics.setColor( WHITE )
   visi = 0
-  for _, chunk in ipairs(self.chunks) do
-    chunk:draw( self.x, self.y )
-  end
+  self.world:draw( self.x, self.y )
   Graphics.drawTile( 152, 112, 128 )
   Graphics.text( 0, 0, WHITE, string.format("%i,%i -- %i", self.x, self.y, visi) )
 end
 
 function TestState:update(dt)
   if keypress["escape"]==1 then StateMachine.pop() end
-  if keypress["r"]==1 then self:generateWorld() end
   local x, y = 0, 0
   local u, l, r, d = keypress["up"], keypress["left"], keypress["right"], keypress["down"]
   if u == 1 or u >= 1.333 then y = y - 1 end
@@ -459,6 +489,8 @@ function TestState:move( dx, dy )
 
   local newx, newy = self.x + dx, self.y + dy
   self.x, self.y = newx, newy
+
+  self.world:generate( newx, newy )
 end
 
 ----------------------------------------
