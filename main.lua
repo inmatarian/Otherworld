@@ -389,14 +389,14 @@ function intersect( ax, ay, aw, ah, bx, by, bw, bh )
   return tx1, ty1, tw, th
 end
 
-function WorldChunk:draw( px, py )
-  local vx, vy, vw, vh = intersect( self.x, self.y, self.w, self.h, px-10, py-7, 21, 15 )
+function WorldChunk:draw( px, py, ox, oy )
+  local vx, vy, vw, vh = intersect( self.x, self.y, self.w, self.h, px-10, py-7, 22, 16 )
   if not vx then return end
   for y = vy, vy+vh-1 do
     for x = vx, vx+vw-1 do
       local floor = self.floor:get( x, y )
       if floor then
-        local tx, ty = (x-px)*16+152, (y-py)*16+112
+        local tx, ty = (x-px-ox)*16+152, (y-py-oy)*16+112
         Graphics.drawTile( tx, ty, floor )
         visi = visi + 1
       end
@@ -414,16 +414,19 @@ function WorldMap:init()
 end
 
 function WorldMap:draw( px, py )
-  local wx, wy = math.floor(px/self.CHUNK_SIZE), math.floor(py/self.CHUNK_SIZE)
+  pfx, pfy = math.floor(px), math.floor(py)
+  ox, oy = px - pfx, py - pfy
+  local wx, wy = math.floor(pfx/self.CHUNK_SIZE), math.floor(pfy/self.CHUNK_SIZE)
   for y = wy - 1, wy + 1 do
     for x = wx - 1, wx + 1 do
       chunk = self.chunks:get( x, y )
-      if chunk then chunk:draw( px, py ) end
+      if chunk then chunk:draw( pfx, pfy, ox, oy ) end
     end
   end
 end
 
 function WorldMap:generate( px, py )
+  px, py = math.floor(px), math.floor(py)
   local SIZE = self.CHUNK_SIZE
   local wx, wy = math.floor(px/SIZE), math.floor(py/SIZE)
   for y = wy - 1, wy + 1 do
@@ -457,6 +460,7 @@ end
 ----------------------------------------
 
 TestState = class()
+TestState.SPEED = 7
 
 function TestState:init()
   self.x = 0
@@ -475,17 +479,21 @@ end
 
 function TestState:update(dt)
   if keypress["escape"]==1 then StateMachine.pop() end
-  local x, y = 0, 0
-  local u, l, r, d = keypress["up"], keypress["left"], keypress["right"], keypress["down"]
-  if u == 1 or u >= 1.333 then y = y - 1 end
-  if d == 1 or d >= 1.333 then y = y + 1 end
-  if l == 1 or l >= 1.333 then x = x - 1 end
-  if r == 1 or r >= 1.333 then x = x + 1 end
-  self:move( x, y )
+  self:move(keypress["up"], keypress["down"], keypress["left"], keypress["right"], dt)
 end
 
-function TestState:move( dx, dy )
+function TestState:move( u, d, l, r, dt )
+  local dx, dy = 0, 0
+  if u >= 1 then dy = dy - dt end
+  if d >= 1 then dy = dy + dt end
+  if l >= 1 then dx = dx - dt end
+  if r >= 1 then dx = dx + dt end
+
   if dx == 0 and dy == 0 then return end
+
+  -- Crude approximation of pythogorean, just to feel fast and not super fast.
+  if dx ~= 0 and dy ~= 0 then dx, dy = dx * 0.75, dy * 0.75 end
+  dx, dy = dx * self.SPEED, dy * self.SPEED
 
   local newx, newy = self.x + dx, self.y + dy
   self.x, self.y = newx, newy
